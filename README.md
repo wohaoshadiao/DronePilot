@@ -69,6 +69,7 @@ DronePilot/
 
 ### 主要文件夹说明
 
+<<<<<<< HEAD
 | 文件夹                     | 说明                                                            |
 | -------------------------- | --------------------------------------------------------------- |
 | `src/main/`                | Electron 主进程代码，负责窗口管理、MAVLink 数据模拟、设备连接等 |
@@ -80,6 +81,19 @@ DronePilot/
 | `scripts/`                 | 地图下载等辅助脚本                                              |
 | `build/`                   | Electron Builder 构建资源                                       |
 | `out/`                     | Vite 编译后的输出文件                                           |
+=======
+| 文件夹 | 说明 |
+|--------|------|
+| `src/main/` | Electron 主进程代码，负责窗口管理、MAVLink 数据模拟、设备连接等 |
+| `src/preload/` | 预加载脚本，在渲染进程中安全地暴露 Node.js API |
+| `src/renderer/` | 前端界面代码，包含 Vue 组件、地图展示、遥测数据可视化等 |
+| `src/renderer/tiles/` | OpenStreetMap 离线地图瓦片存储目录 |
+| `src/renderer/tiles-amap/` | 高德地图离线瓦片存储目录 |
+| `resources/` | 应用图标等资源文件 |
+| `scripts/` | 地图下载等辅助脚本 |
+| `build/` | Electron Builder 构建资源 |
+| `out/` | Vite 编译后的输出文件 |
+>>>>>>> 5ed578830f65e8b5699c600ae83c5f7cba3d35d7
 
 ## 🚀 快速开始
 
