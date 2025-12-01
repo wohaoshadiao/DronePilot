@@ -14,6 +14,22 @@ const api = {
   // 移除监听器
   removeMavlinkListener: () => {
     ipcRenderer.removeAllListeners('mavlink-data')
+  },
+
+  // 高级模式
+  openAdvancedMode: () => ipcRenderer.send('open-advanced-mode'),
+
+  // 验证密码
+  verifyPassword: (password) => ipcRenderer.invoke('verify-password', password),
+
+  // MAVLink 原始数据监听
+  onMavlinkRawData: (callback) => {
+    ipcRenderer.on('mavlink-raw-data', (event, data) => callback(data))
+  },
+
+  // 移除原始数据监听器
+  removeMavlinkRawListener: () => {
+    ipcRenderer.removeAllListeners('mavlink-raw-data')
   }
 }
 

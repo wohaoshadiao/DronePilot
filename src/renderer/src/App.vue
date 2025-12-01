@@ -41,10 +41,14 @@ const menuItems = reactive([
     isOpen: false,
     children: ['Media Files', 'Flight Logs']
   },
-  { title: 'Settings', icon: 'settings-outline', isOpen: false }
+  {
+    title: 'Settings',
+    icon: 'settings-outline',
+    isOpen: false,
+    children: ['Advanced Mode']
+  }
 ])
 
-const optionsOpen = ref(false)
 const statusPanelOpen = ref(false) // 右侧状态面板展开状态
 const selectedMapSource = ref('amap') // 地图源选择: 'amap' | 'osm'
 
@@ -62,12 +66,22 @@ const toggleMenu = (index) => {
   menuItems[index].isOpen = !menuItems[index].isOpen
 }
 
-const toggleOptions = () => {
-  optionsOpen.value = !optionsOpen.value
-}
-
 const toggleStatusPanel = () => {
   statusPanelOpen.value = !statusPanelOpen.value
+}
+
+// 处理子菜单项点击
+const handleMenuItemClick = (parentTitle, childName) => {
+  if (parentTitle === 'Settings' && childName === 'Advanced Mode') {
+    openAdvancedMode()
+  }
+}
+
+// 打开高级模式窗口
+const openAdvancedMode = () => {
+  if (window.electron && window.electron.openAdvancedMode) {
+    window.electron.openAdvancedMode()
+  }
 }
 
 // 切换地图源
@@ -332,7 +346,7 @@ onUnmounted(() => {
             ></ion-icon>
           </div>
           <div class="submenu" v-show="item.isOpen && item.children">
-            <span v-for="(child, cIndex) in item.children" :key="cIndex" class="submenu-item">
+            <span v-for="(child, cIndex) in item.children" :key="cIndex" class="submenu-item" @click="handleMenuItemClick(item.title, child)">
               {{ child }}
             </span>
           </div>
@@ -494,31 +508,6 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- 扩展功能按钮（地图右侧居中） -->
-      <div class="map-actions">
-        <div class="action-button-circle" :class="{ open: optionsOpen }" @click="toggleOptions">
-          <ion-icon name="add-outline"></ion-icon>
-        </div>
-        <div class="action-list" :class="{ open: optionsOpen }">
-          <div class="action-list-item">
-            <ion-icon name="stats-chart-outline"></ion-icon>
-            <span>PID Curve Plot</span>
-          </div>
-          <div class="action-list-item">
-            <ion-icon name="settings-outline"></ion-icon>
-            <span>PID Adjust</span>
-          </div>
-          <div class="action-list-item">
-            <ion-icon name="document-text-outline"></ion-icon>
-            <span>Log File Analysis</span>
-          </div>
-          <div class="action-list-item">
-            <ion-icon name="camera-outline"></ion-icon>
-            <span>Camera Settings</span>
-          </div>
-        </div>
-      </div>
-
       <div id="map"></div>
     </main>
   </div>
@@ -672,88 +661,6 @@ onUnmounted(() => {
   height: 100%;
   background: #10b981;
   transition: width 0.5s;
-}
-
-/* 地图区域扩展功能按钮（右侧居中） */
-.map-actions {
-  position: absolute;
-  right: 20px;
-  top: 50%;
-  transform: translateY(-50%);
-  z-index: 1000;
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 15px;
-}
-
-.action-button-circle {
-  width: 56px;
-  height: 56px;
-  border-radius: 50%;
-  background: var(--accent);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
-  color: #fff;
-  font-size: 28px;
-  transition: all 0.3s ease;
-  border: 2px solid rgba(59, 130, 246, 0.3);
-}
-
-.action-button-circle:hover {
-  transform: scale(1.05);
-  box-shadow: 0 6px 16px rgba(59, 130, 246, 0.6);
-  background: #2563eb;
-}
-
-.action-button-circle.open {
-  transform: rotate(45deg);
-  background: #1e40af;
-}
-
-.action-list {
-  max-width: 0;
-  overflow: hidden;
-  transition: max-width 0.3s ease-out;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  white-space: nowrap;
-}
-
-.action-list.open {
-  max-width: 250px;
-}
-
-.action-list-item {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 15px;
-  background: rgba(15, 23, 42, 0.9);
-  backdrop-filter: blur(10px);
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  border: 1px solid rgba(59, 130, 246, 0.3);
-  color: var(--text-muted);
-  font-size: 13px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
-}
-
-.action-list-item:hover {
-  background: rgba(59, 130, 246, 0.2);
-  border-color: rgba(59, 130, 246, 0.6);
-  color: #fff;
-  transform: translateX(-5px);
-}
-
-.action-list-item ion-icon {
-  font-size: 18px;
-  color: var(--accent);
 }
 
 /* --- MAP AREA --- */
@@ -1063,33 +970,53 @@ onUnmounted(() => {
   transform: translateX(0);
 }
 
+/* 滚动条样式 - 与地图背景一致 */
+.drone-status-panel::-webkit-scrollbar {
+  width: 8px;
+}
+
+.drone-status-panel::-webkit-scrollbar-track {
+  background: rgba(15, 15, 15, 0.5);
+  border-radius: 4px;
+}
+
+.drone-status-panel::-webkit-scrollbar-thumb {
+  background: rgba(59, 130, 246, 0.3);
+  border-radius: 4px;
+  border: 1px solid rgba(59, 130, 246, 0.2);
+}
+
+.drone-status-panel::-webkit-scrollbar-thumb:hover {
+  background: rgba(59, 130, 246, 0.5);
+}
+
 .status-panel-toggle {
   position: fixed;
   right: 0;
   top: 50%;
   transform: translateY(-50%);
-  width: 50px;
-  height: 100px;
-  background: rgba(59, 130, 246, 0.9);
+  width: 32px;
+  height: 60px;
+  background: rgba(59, 130, 246, 0.5);
   backdrop-filter: blur(10px);
-  border: 2px solid rgba(59, 130, 246, 0.5);
+  border: 1px solid rgba(59, 130, 246, 0.3);
   border-right: none;
-  border-radius: 12px 0 0 12px;
+  border-radius: 8px 0 0 8px;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   transition: all 0.3s ease;
   color: #fff;
-  font-size: 28px;
-  box-shadow: -4px 0 20px rgba(59, 130, 246, 0.6);
+  font-size: 20px;
+  box-shadow: -2px 0 10px rgba(59, 130, 246, 0.3);
   z-index: 1002;
 }
 
 .status-panel-toggle:hover {
-  background: rgba(59, 130, 246, 1);
-  right: 5px;
-  box-shadow: -6px 0 25px rgba(59, 130, 246, 0.8);
+  background: rgba(59, 130, 246, 0.7);
+  right: 3px;
+  box-shadow: -4px 0 15px rgba(59, 130, 246, 0.5);
   transform: translateY(-50%) scale(1.05);
 }
 

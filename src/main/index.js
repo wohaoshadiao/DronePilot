@@ -6,9 +6,13 @@ import icon from '../../resources/icon.png?asset'
 // 注意：后续可以集成真实的 MAVLink 库
 // import { MAVLinkModule } from 'node-mavlink'
 
+let mainWindow = null
+let advancedModeWindow = null
+let mavlinkRawData = [] // 存储原始MAVLink数据
+ 
 function createWindow() {
   // 创建浏览器窗口
-  const mainWindow = new BrowserWindow({
+  mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
     show: false,
@@ -40,7 +44,60 @@ function createWindow() {
     return { status: 'success', msg: '设备已连接' }
   })
 
-  // 2. 启动 MAVLink 数据模拟器
+  // 2. 高级模式窗口
+  ipcMain.on('open-advanced-mode', () => {
+    if (advancedModeWindow) {
+      advancedModeWindow.focus()
+      return
+    }
+
+    advancedModeWindow = new BrowserWindow({
+      width: 500,
+      height: 300,
+      show: false,
+      autoHideMenuBar: true,
+      resizable: false,
+      parent: mainWindow,
+      modal: false,
+      ...(process.platform === 'linux' ? { icon } : {}),
+      webPreferences: {
+        preload: join(__dirname, '../preload/index.js'),
+        sandbox: false,
+        nodeIntegration: false,
+        contextIsolation: true
+      }
+    })
+
+    advancedModeWindow.on('ready-to-show', () => {
+      advancedModeWindow.show()
+    })
+
+    advancedModeWindow.on('closed', () => {
+      advancedModeWindow = null
+    })
+
+    if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
+      advancedModeWindow.loadURL(process.env['ELECTRON_RENDERER_URL'] + '/advanced.html')
+    } else {
+      advancedModeWindow.loadFile(join(__dirname, '../renderer/advanced.html'))
+    }
+  })
+
+  // 验证密码
+  ipcMain.handle('verify-password', async (_event, password) => {
+    // 简单的密码验证，实际应用中应该更安全
+    const correctPassword = 'admin123'
+    return password === correctPassword
+  })
+
+  // 发送原始MAVLink数据到高级模式窗口
+  function sendRawDataToAdvancedWindow(rawData) {
+    if (advancedModeWindow && !advancedModeWindow.isDestroyed()) {
+      advancedModeWindow.webContents.send('mavlink-raw-data', rawData)
+    }
+  }
+
+  // 3. 启动 MAVLink 数据模拟器
   function startMavlinkSimulator() {
     // 固定位置（北京天安门）
     const latitude = 39.9042
@@ -124,6 +181,34 @@ function createWindow() {
         vfr_hud: vfrHudData,
         battery: batteryData
       })
+
+      // 构建原始MAVLink数据帧用于高级模式显示
+      const rawDataFrame = {
+        timestamp: Date.now(),
+        magic: 0xFD, // MAVLink 2.0
+        len: 33, // 假设payload长度
+        incompat_flags: 0,
+        compat_flags: 0,
+        seq: Math.floor(Date.now() / 100) % 256,
+        sysid: 1,
+        compid: 1,
+        msgid: 33, // GLOBAL_POSITION_INT
+        payload: {
+          time_boot_ms: Date.now() % 1000000,
+          lat: parseInt(mavlinkData.latitude),
+          lon: parseInt(mavlinkData.longitude),
+          alt: parseInt(mavlinkData.altitude),
+          relative_alt: parseInt(mavlinkData.relative_alt),
+          vx: mavlinkData.vx,
+          vy: mavlinkData.vy,
+          vz: mavlinkData.vz,
+          hdg: parseInt(mavlinkData.heading)
+        },
+        checksum: 0x0000 // 简化处理
+      }
+
+      // 发送原始数据到高级模式窗口
+      sendRawDataToAdvancedWindow(rawDataFrame)
     }, 100) // 10 Hz1
   }
 
