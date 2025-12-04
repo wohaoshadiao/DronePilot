@@ -16,6 +16,11 @@
 - **MAVLink 协议** - 支持标准 MAVLink 通信协议
 - **跨平台支持** - Windows、macOS、Linux 全平台支持
 
+### 地图界面
+这张图片是 `DronePilot` 地面站的初始界面，参考 **大疆司空 2** 的渲染风格以及 `QGC` 地面站的使用逻辑。
+
+![地面站](https://youke1.picui.cn/s1/2025/12/04/6931898ca7ea7.png "DronePilot")
+
 ## 🏗️ 技术架构
 
 ### 核心框架
