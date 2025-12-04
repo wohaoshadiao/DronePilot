@@ -3,12 +3,23 @@ import { electronAPI } from '@electron-toolkit/preload'
 
 // 暴露给渲染进程的 API
 const api = {
-  // 封装 IPC 请求，方便 Vue 调用
-  connectDevice: (deviceId) => ipcRenderer.invoke('connect-device', deviceId),
+  // 串口相关API
+  listSerialPorts: () => ipcRenderer.invoke('list-serial-ports'),
+  connectSerial: (portPath, baudRate) => ipcRenderer.invoke('connect-serial', portPath, baudRate),
+  disconnectSerial: () => ipcRenderer.invoke('disconnect-serial'),
+
+  // WebSocket相关API
+  connectWebSocket: (wsUrl) => ipcRenderer.invoke('connect-websocket', wsUrl),
+  disconnectWebSocket: () => ipcRenderer.invoke('disconnect-websocket'),
 
   // MAVLink 数据监听
   onMavlinkData: (callback) => {
     ipcRenderer.on('mavlink-data', (event, data) => callback(data))
+  },
+
+  // 固件信息监听
+  onFirmwareInfo: (callback) => {
+    ipcRenderer.on('firmware-info', (event, data) => callback(data))
   },
 
   // 移除监听器
@@ -16,20 +27,50 @@ const api = {
     ipcRenderer.removeAllListeners('mavlink-data')
   },
 
-  // 高级模式
-  openAdvancedMode: () => ipcRenderer.send('open-advanced-mode'),
-
-  // 验证密码
-  verifyPassword: (password) => ipcRenderer.invoke('verify-password', password),
-
-  // MAVLink 原始数据监听
-  onMavlinkRawData: (callback) => {
-    ipcRenderer.on('mavlink-raw-data', (event, data) => callback(data))
+  removeFirmwareListener: () => {
+    ipcRenderer.removeAllListeners('firmware-info')
   },
 
-  // 移除原始数据监听器
-  removeMavlinkRawListener: () => {
-    ipcRenderer.removeAllListeners('mavlink-raw-data')
+  // IMU数据监听
+  onImuData: (callback) => {
+    ipcRenderer.on('imu-data', (event, data) => callback(data))
+  },
+
+  // WebSocket连接状态监听
+  onWebSocketConnected: (callback) => {
+    ipcRenderer.on('websocket-connected', () => callback())
+  },
+
+  onWebSocketDisconnected: (callback) => {
+    ipcRenderer.on('websocket-disconnected', () => callback())
+  },
+
+  onWebSocketError: (callback) => {
+    ipcRenderer.on('websocket-error', (event, error) => callback(error))
+  },
+
+  // 串口错误监听
+  onSerialError: (callback) => {
+    ipcRenderer.on('serial-error', (event, error) => callback(error))
+  },
+
+  // 串口断开监听
+  onSerialDisconnected: (callback) => {
+    ipcRenderer.on('serial-disconnected', () => callback())
+  },
+
+  // 移除串口监听器
+  removeSerialListeners: () => {
+    ipcRenderer.removeAllListeners('serial-error')
+    ipcRenderer.removeAllListeners('serial-disconnected')
+  },
+
+  // 移除WebSocket监听器
+  removeWebSocketListeners: () => {
+    ipcRenderer.removeAllListeners('imu-data')
+    ipcRenderer.removeAllListeners('websocket-connected')
+    ipcRenderer.removeAllListeners('websocket-disconnected')
+    ipcRenderer.removeAllListeners('websocket-error')
   }
 }
 

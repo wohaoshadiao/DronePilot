@@ -2,13 +2,14 @@ import { app, shell, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
-
-// 注意：后续可以集成真实的 MAVLink 库
-// import { MAVLinkModule } from 'node-mavlink'
+import { SerialPort } from 'serialport'
+import { MavLinkPacketSplitter, MavLinkPacketParser, MavLinkProtocolV2, minimal, common } from 'node-mavlink'
+import WebSocket from 'ws'
 
 let mainWindow = null
-let advancedModeWindow = null
-let mavlinkRawData = [] // 存储原始MAVLink数据
+let serialPort = null
+let wsClient = null
+let packetDebugCount = 0 // 用于限制调试日志数量
  
 function createWindow() {
   // 创建浏览器窗口
@@ -37,183 +38,269 @@ function createWindow() {
 
   // === MAVLink 地面站核心逻辑 ===
 
-  // 1. 设置 IPC 通用消息监听
-  ipcMain.handle('connect-device', async (event, deviceId) => {
-    console.log(`正在连接设备: ${deviceId}...`)
-    // 这里可以添加真实的串口或TCP连接逻辑
-    return { status: 'success', msg: '设备已连接' }
-  })
-
-  // 2. 高级模式窗口
-  ipcMain.on('open-advanced-mode', () => {
-    if (advancedModeWindow) {
-      advancedModeWindow.focus()
-      return
-    }
-
-    advancedModeWindow = new BrowserWindow({
-      width: 500,
-      height: 300,
-      show: false,
-      autoHideMenuBar: true,
-      resizable: false,
-      parent: mainWindow,
-      modal: false,
-      ...(process.platform === 'linux' ? { icon } : {}),
-      webPreferences: {
-        preload: join(__dirname, '../preload/index.js'),
-        sandbox: false,
-        nodeIntegration: false,
-        contextIsolation: true
-      }
-    })
-
-    advancedModeWindow.on('ready-to-show', () => {
-      advancedModeWindow.show()
-    })
-
-    advancedModeWindow.on('closed', () => {
-      advancedModeWindow = null
-    })
-
-    if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
-      advancedModeWindow.loadURL(process.env['ELECTRON_RENDERER_URL'] + '/advanced.html')
-    } else {
-      advancedModeWindow.loadFile(join(__dirname, '../renderer/advanced.html'))
+  // 1. 获取可用串口列表
+  ipcMain.handle('list-serial-ports', async () => {
+    try {
+      const ports = await SerialPort.list()
+      return ports.map(port => ({
+        path: port.path,
+        manufacturer: port.manufacturer,
+        serialNumber: port.serialNumber,
+        productId: port.productId,
+        vendorId: port.vendorId
+      }))
+    } catch (error) {
+      console.error('获取串口列表失败:', error)
+      return []
     }
   })
 
-  // 验证密码
-  ipcMain.handle('verify-password', async (_event, password) => {
-    // 简单的密码验证，实际应用中应该更安全
-    const correctPassword = 'admin123'
-    return password === correctPassword
-  })
-
-  // 发送原始MAVLink数据到高级模式窗口
-  function sendRawDataToAdvancedWindow(rawData) {
-    if (advancedModeWindow && !advancedModeWindow.isDestroyed()) {
-      advancedModeWindow.webContents.send('mavlink-raw-data', rawData)
-    }
-  }
-
-  // 3. 启动 MAVLink 数据模拟器
-  function startMavlinkSimulator() {
-    // 固定位置（北京天安门）
-    const latitude = 39.9042
-    const longitude = 116.4074
-    let altitude = 120
-    let heading = 0
-    let groundSpeed = 0 // 悬停，速度为0
-    let battery = 92
-    let roll = 0
-    let pitch = 0
-    let yaw = 0
-
-    // 每 100ms 发送一次模拟的 MAVLink 数据
-    setInterval(() => {
-      // 模拟轻微的姿态变化（悬停时的微小抖动）
-      roll = (Math.random() - 0.5) * 0.05 // ±0.05 弧度
-      pitch = (Math.random() - 0.5) * 0.05
-      yaw = (Math.random() - 0.5) * 0.02
-
-      // 模拟轻微的高度变化
-      altitude = 120 + (Math.random() - 0.5) * 0.5
-
-      // 慢速电池消耗
-      if (Math.random() < 0.005) {
-        battery = Math.max(0, battery - 0.1)
+  // 2. 连接到串口设备
+  ipcMain.handle('connect-serial', async (_event, portPath, baudRate = 115200) => {
+    try {
+      // 如果已有连接，先断开
+      if (serialPort && serialPort.isOpen) {
+        serialPort.close()
       }
 
-      // 模拟的 MAVLink 数据包
-      const mavlinkData = {
-        type: 'GLOBAL_POSITION_INT',
-        timestamp: Date.now(),
-        latitude: (latitude * 1e7).toFixed(0), // MAVLink uses lat/lon * 1e7
-        longitude: (longitude * 1e7).toFixed(0),
-        altitude: (altitude * 1000).toFixed(0), // mm
-        relative_alt: (altitude * 1000).toFixed(0),
-        vx: 0,
-        vy: 0,
-        vz: 0,
-        heading: (heading * 100).toFixed(0) // centidegrees
-      }
+      // 重置调试计数器
+      packetDebugCount = 0
 
-      const attitudeData = {
-        type: 'ATTITUDE',
-        timestamp: Date.now(),
-        roll: roll,
-        pitch: pitch,
-        yaw: yaw,
-        rollspeed: 0,
-        pitchspeed: 0,
-        yawspeed: 0
-      }
-
-      const vfrHudData = {
-        type: 'VFR_HUD',
-        timestamp: Date.now(),
-        airspeed: groundSpeed,
-        groundspeed: groundSpeed,
-        heading: heading.toFixed(0),
-        throttle: 50,
-        alt: altitude,
-        climb: 0
-      }
-
-      const batteryData = {
-        type: 'BATTERY_STATUS',
-        timestamp: Date.now(),
-        battery_remaining: battery.toFixed(0),
-        voltages: [16800, 16700, 16750, 16800, 0, 0, 0, 0, 0, 0], // 单位：mV
-        current_battery: 850, // 当前电流 850mA
-        current_consumed: 1250, // 已消耗电量 1250mAh
-        energy_consumed: -1,
-        battery_function: 0,
-        battery_type: 1, // LiPo
-        temperature: 350 // 温度 35.0°C (单位：0.01度)
-      }
-
-      // 通过 IPC 发送给渲染进程1
-      mainWindow.webContents.send('mavlink-data', {
-        position: mavlinkData,
-        attitude: attitudeData,
-        vfr_hud: vfrHudData,
-        battery: batteryData
+      // 创建串口连接
+      serialPort = new SerialPort({
+        path: portPath,
+        baudRate: baudRate,
+        dataBits: 8,
+        stopBits: 1,
+        parity: 'none'
       })
 
-      // 构建原始MAVLink数据帧用于高级模式显示
-      const rawDataFrame = {
-        timestamp: Date.now(),
-        magic: 0xFD, // MAVLink 2.0
-        len: 33, // 假设payload长度
-        incompat_flags: 0,
-        compat_flags: 0,
-        seq: Math.floor(Date.now() / 100) % 256,
-        sysid: 1,
-        compid: 1,
-        msgid: 33, // GLOBAL_POSITION_INT
-        payload: {
-          time_boot_ms: Date.now() % 1000000,
-          lat: parseInt(mavlinkData.latitude),
-          lon: parseInt(mavlinkData.longitude),
-          alt: parseInt(mavlinkData.altitude),
-          relative_alt: parseInt(mavlinkData.relative_alt),
-          vx: mavlinkData.vx,
-          vy: mavlinkData.vy,
-          vz: mavlinkData.vz,
-          hdg: parseInt(mavlinkData.heading)
-        },
-        checksum: 0x0000 // 简化处理
+      // 创建MAVLink解析器
+      const reader = serialPort
+        .pipe(new MavLinkPacketSplitter())
+        .pipe(new MavLinkPacketParser())
+
+      // 监听MAVLink消息
+      reader.on('data', (packet) => {
+        handleMavlinkPacket(packet)
+      })
+
+      serialPort.on('error', (err) => {
+        console.error('<------串口错误------>', err)
+        mainWindow.webContents.send('serial-error', err.message)
+      })
+
+      serialPort.on('close', () => {
+        console.log('<------串口已关闭------>')
+        mainWindow.webContents.send('serial-disconnected')
+      })
+
+      return { status: 'success', msg: `已连接到 ${portPath}` }
+    } catch (error) {
+      console.error('连接串口失败:', error)
+      return { status: 'error', msg: error.message }
+    }
+  })
+
+  // 3. 断开串口连接
+  ipcMain.handle('disconnect-serial', async () => {
+    try {
+      if (serialPort && serialPort.isOpen) {
+        serialPort.close()
+        serialPort = null
+        mavlinkParser = null
+        return { status: 'success', msg: '已断开连接' }
+      }
+      return { status: 'success', msg: '无活动连接' }
+    } catch (error) {
+      return { status: 'error', msg: error.message }
+    }
+  })
+
+  // 4. 处理MAVLink数据包
+  function handleMavlinkPacket(packet) {
+    try {
+
+      // 根据消息ID手动解析消息
+      const msgid = packet.header.msgid
+      let message = null
+
+      // 定义遥测数据结构
+      const telemetryData = {}
+
+      // 根据消息ID解析对应的消息类型
+      switch (msgid) {
+        case 0: // HEARTBEAT
+          message = packet.protocol.data(packet.payload, minimal.Heartbeat)
+
+          // 获取autopilot类型并映射到操作系统
+          const autopilot = message.autopilot
+          let firmwareOS = ''
+
+          // MAV_AUTOPILOT 枚举值
+          // 3 = MAV_AUTOPILOT_ARDUPILOTMEGA (ArduPilot)
+          // 12 = MAV_AUTOPILOT_PX4
+          if (autopilot === 3) {
+            firmwareOS = 'ChibiOS' // ArduPilot 使用 ChibiOS
+          } else if (autopilot === 12) {
+            firmwareOS = 'NuttX' // PX4 使用 NuttX
+          }
+
+          // 发送固件信息到渲染进程
+          if (firmwareOS) {
+            mainWindow.webContents.send('firmware-info', { os: firmwareOS, autopilot })
+          }
+
+          break
+
+        case 30: // ATTITUDE
+          message = packet.protocol.data(packet.payload, common.Attitude)
+          telemetryData.attitude = {
+            type: 'ATTITUDE',
+            timestamp: Date.now(),
+            roll: message.roll,
+            pitch: message.pitch,
+            yaw: message.yaw,
+            rollspeed: message.rollspeed,
+            pitchspeed: message.pitchspeed,
+            yawspeed: message.yawspeed
+          }
+          // console.log('✓ 已处理 ATTITUDE - Roll:', message.roll, 'Pitch:', message.pitch, 'Yaw:', message.yaw)
+          break
+
+        case 33: // GLOBAL_POSITION_INT
+          message = packet.protocol.data(packet.payload, common.GlobalPositionInt)
+          telemetryData.position = {
+            type: 'GLOBAL_POSITION_INT',
+            timestamp: Date.now(),
+            latitude: message.lat,
+            longitude: message.lon,
+            altitude: message.alt,
+            relative_alt: message.relativeAlt,
+            vx: message.vx,
+            vy: message.vy,
+            vz: message.vz,
+            heading: message.hdg
+          }
+          // console.log('✓ 已处理 GLOBAL_POSITION_INT')
+          break
+
+        case 74: // VFR_HUD
+          message = packet.protocol.data(packet.payload, common.VfrHud)
+          telemetryData.vfr_hud = {
+            type: 'VFR_HUD',
+            timestamp: Date.now(),
+            airspeed: message.airspeed,
+            groundspeed: message.groundspeed,
+            heading: message.heading,
+            throttle: message.throttle,
+            alt: message.alt,
+            climb: message.climb
+          }
+          // console.log('✓ 已处理 VFR_HUD')
+          break
+
+        case 147: // BATTERY_STATUS
+          message = packet.protocol.data(packet.payload, common.BatteryStatus)
+          telemetryData.battery = {
+            type: 'BATTERY_STATUS',
+            timestamp: Date.now(),
+            battery_remaining: message.batteryRemaining,
+            voltages: message.voltages,
+            current_battery: message.currentBattery,
+            current_consumed: message.currentConsumed,
+            energy_consumed: message.energyConsumed,
+            battery_function: message.batteryFunction,
+            battery_type: message.type,
+            temperature: message.temperature
+          }
+          // console.log('✓ 已处理 BATTERY_STATUS')
+          break
+
+        case 1: // SYS_STATUS
+          message = packet.protocol.data(packet.payload, common.SysStatus)
+          telemetryData.sys_status = {
+            type: 'SYS_STATUS',
+            timestamp: Date.now(),
+            voltage_battery: message.voltageBattery,
+            current_battery: message.currentBattery,
+            battery_remaining: message.batteryRemaining
+          }
+          // console.log('✓ 已处理 SYS_STATUS')
+          break
+
+        default:
+          // 忽略其他消息类型
+          break
       }
 
-      // 发送原始数据到高级模式窗口
-      sendRawDataToAdvancedWindow(rawDataFrame)
-    }, 100) // 10 Hz1
+      // 发送数据到渲染进程
+      if (Object.keys(telemetryData).length > 0) {
+        // console.log('📤 发送数据到渲染进程:', Object.keys(telemetryData))
+        mainWindow.webContents.send('mavlink-data', telemetryData)
+      }
+    } catch (error) {
+      console.error('处理MAVLink数据包失败:', error)
+    }
   }
 
-  // 启动模拟器
-  startMavlinkSimulator()
+    // 6. WebSocket连接 - 用于接收IMU数据
+  ipcMain.handle('connect-websocket', async (_event, wsUrl) => {
+    try {
+      // 如果已有连接，先断开
+      if (wsClient && wsClient.readyState === WebSocket.OPEN) {
+        wsClient.close()
+      }
+
+      wsClient = new WebSocket(wsUrl)
+
+      wsClient.on('open', () => {
+        console.log('WebSocket已连接:', wsUrl)
+        mainWindow.webContents.send('websocket-connected')
+      })
+
+      wsClient.on('message', (data) => {
+        try {
+          // 解析IMU数据
+          const imuData = JSON.parse(data.toString())
+
+          // 发送IMU数据到渲染进程
+          mainWindow.webContents.send('imu-data', imuData)
+        } catch (error) {
+          console.error('解析IMU数据失败:', error)
+        }
+      })
+
+      wsClient.on('error', (error) => {
+        console.error('WebSocket错误:', error)
+        mainWindow.webContents.send('websocket-error', error.message)
+      })
+
+      wsClient.on('close', () => {
+        console.log('WebSocket已断开')
+        mainWindow.webContents.send('websocket-disconnected')
+      })
+
+      return { status: 'success', msg: `正在连接到 ${wsUrl}` }
+    } catch (error) {
+      console.error('连接WebSocket失败:', error)
+      return { status: 'error', msg: error.message }
+    }
+  })
+
+  // 6. 断开WebSocket连接
+  ipcMain.handle('disconnect-websocket', async () => {
+    try {
+      if (wsClient && wsClient.readyState === WebSocket.OPEN) {
+        wsClient.close()
+        wsClient = null
+        return { status: 'success', msg: '已断开WebSocket连接' }
+      }
+      return { status: 'success', msg: '无活动WebSocket连接' }
+    } catch (error) {
+      return { status: 'error', msg: error.message }
+    }
+  })
 
   // === 核心逻辑结束 ===
 

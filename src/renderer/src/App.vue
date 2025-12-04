@@ -5,21 +5,21 @@ import 'leaflet/dist/leaflet.css'
 import { wgs84ToGcj02 } from './utils/coordTransform'
 
 // 状态管理
-const telemetry = reactive({
+let telemetry = reactive({
   latitude: 39.9042, // WGS-84 坐标（北京天安门）
   longitude: 116.4074,
-  altitude: 120.0,
+  altitude: 10.0,
   heading: 0,
   speed: 0,
-  battery: 92,
+  battery: 0,
   roll: 0,
   pitch: 0,
   yaw: 0,
   // 电池详细信息
-  batteryVoltages: [16.8, 16.7, 16.75, 16.8], // 单位：V
-  batteryCurrent: 850, // 单位：mA
-  batteryConsumed: 1250, // 已消耗 mAh
-  batteryTemp: 35.0 // 温度 °C
+  batteryVoltages: [0, 0, 0, 0], // 单位：V
+  batteryCurrent: 0, // 单位：mA
+  batteryConsumed: 0, // 已消耗 mAh
+  batteryTemp: 0 // 温度 °C
 })
 
 const menuItems = reactive([
@@ -40,17 +40,22 @@ const menuItems = reactive([
     icon: 'cloud-outline',
     isOpen: false,
     children: ['Media Files', 'Flight Logs']
-  },
-  {
-    title: 'Settings',
-    icon: 'settings-outline',
-    isOpen: false,
-    children: ['Advanced Mode']
   }
 ])
 
 const statusPanelOpen = ref(false) // 右侧状态面板展开状态
 const selectedMapSource = ref('amap') // 地图源选择: 'amap' | 'osm'
+const showVideoFeed = ref(false) // 视频窗口显示状态
+
+// 串口连接相关
+const serialPorts = ref([])
+const selectedPort = ref('')
+const selectedBaudRate = ref(115200)
+const isConnected = ref(false)
+const connectionStatus = ref('未连接')
+const firmwareOS = ref('') // 固件操作系统信息
+const baudRateOptions = [9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600]
+const showConnectionDropdown = ref(false) // 控制下拉框显示
 
 // Map 相关
 let map = null
@@ -70,17 +75,54 @@ const toggleStatusPanel = () => {
   statusPanelOpen.value = !statusPanelOpen.value
 }
 
-// 处理子菜单项点击
-const handleMenuItemClick = (parentTitle, childName) => {
-  if (parentTitle === 'Settings' && childName === 'Advanced Mode') {
-    openAdvancedMode()
+const toggleVideoFeed = () => {
+  showVideoFeed.value = !showVideoFeed.value
+}
+
+// 切换连接下拉框
+const toggleConnectionDropdown = () => {
+  showConnectionDropdown.value = !showConnectionDropdown.value
+}
+
+// 获取串口列表
+const refreshSerialPorts = async () => {
+  if (window.electron && window.electron.listSerialPorts) {
+    const ports = await window.electron.listSerialPorts()
+    serialPorts.value = ports
+    if (ports.length > 0 && !selectedPort.value) {
+      selectedPort.value = ports[0].path
+    }
   }
 }
 
-// 打开高级模式窗口
-const openAdvancedMode = () => {
-  if (window.electron && window.electron.openAdvancedMode) {
-    window.electron.openAdvancedMode()
+// 连接串口
+const connectSerial = async () => {
+  if (!selectedPort.value) {
+    connectionStatus.value = '请选择串口'
+    return
+  }
+
+  connectionStatus.value = '正在连接...'
+
+  if (window.electron && window.electron.connectSerial) {
+    const result = await window.electron.connectSerial(selectedPort.value, selectedBaudRate.value)
+    if (result.status === 'success') {
+      isConnected.value = true
+      connectionStatus.value = '已连接'
+    } else {
+      isConnected.value = false
+      connectionStatus.value = '连接失败: ' + result.msg
+    }
+  }
+}
+
+// 断开连接
+const disconnectSerial = async () => {
+  if (window.electron && window.electron.disconnectSerial) {
+    await window.electron.disconnectSerial()
+    isConnected.value = false
+    connectionStatus.value = '已断开'
+    firmwareOS.value = '' // 清空固件信息
   }
 }
 
@@ -131,7 +173,7 @@ const initMap = () => {
     'https://webst0{s}.is.autonavi.com/appmaptile?style=6&x={x}&y={y}&z={z}',
     {
       subdomains: ['1', '2', '3', '4'],
-      maxZoom: 20,
+      maxZoom: 25,
       minZoom: 3,
       className: 'map-tiles-bright',
       crossOrigin: true
@@ -229,21 +271,30 @@ const updateMapState = () => {
 
 // 处理 MAVLink 数据
 const handleMavlinkData = (data) => {
-  if (data.position) {
-    telemetry.latitude = parseFloat(data.position.latitude) / 1e7
-    telemetry.longitude = parseFloat(data.position.longitude) / 1e7
-    telemetry.altitude = (parseFloat(data.position.altitude) / 1000).toFixed(1)
-  }
+  // console.log('渲染进程收到数据:', data)
+
+/**
+ * parameter: To avoid the map displaying error position data.
+ */
+
+  // if (data.position) {
+  //   telemetry.latitude = parseFloat(data.position.latitude) / 1e7
+  //   telemetry.longitude = parseFloat(data.position.longitude) / 1e7
+  //   telemetry.altitude = (parseFloat(data.position.altitude) / 1000).toFixed(1)
+  //   // console.log('✓ 更新位置数据')
+  // }
 
   if (data.attitude) {
     telemetry.roll = data.attitude.roll
     telemetry.pitch = data.attitude.pitch
     telemetry.yaw = data.attitude.yaw
+    // console.log('✓ 更新姿态角 - Roll:', data.attitude.roll, 'Pitch:', data.attitude.pitch, 'Yaw:', data.attitude.yaw)
   }
 
   if (data.vfr_hud) {
     telemetry.speed = parseFloat(data.vfr_hud.groundspeed).toFixed(1)
     telemetry.heading = parseFloat(data.vfr_hud.heading)
+    // console.log('✓ 更新VFR_HUD数据')
   }
 
   if (data.battery) {
@@ -268,6 +319,7 @@ const handleMavlinkData = (data) => {
     if (data.battery.temperature !== undefined) {
       telemetry.batteryTemp = (data.battery.temperature / 100).toFixed(1) // 转换为摄氏度
     }
+    // console.log('✓ 更新电池数据')
   }
 
   updateMapState()
@@ -276,16 +328,55 @@ const handleMavlinkData = (data) => {
 onMounted(() => {
   initMap()
 
+  // 获取串口列表
+  refreshSerialPorts()
+
   // 监听 MAVLink 数据
   if (window.electron && window.electron.onMavlinkData) {
     window.electron.onMavlinkData(handleMavlinkData)
+  }
+
+  // 监听固件信息
+  if (window.electron && window.electron.onFirmwareInfo) {
+    window.electron.onFirmwareInfo((data) => {
+      firmwareOS.value = data.os
+      console.log('固件系统:', data.os, '| Autopilot类型:', data.autopilot)
+    })
+  }
+
+  // 监听串口错误
+  if (window.electron && window.electron.onSerialError) {
+    window.electron.onSerialError((error) => {
+      console.error('串口错误:', error)
+      connectionStatus.value = '错误: ' + error
+      isConnected.value = false
+      firmwareOS.value = '' // 清空固件信息
+    })
+  }
+
+  // 监听串口断开
+  if (window.electron && window.electron.onSerialDisconnected) {
+    window.electron.onSerialDisconnected(() => {
+      console.log('串口已断开')
+      connectionStatus.value = '连接已断开'
+      isConnected.value = false
+      firmwareOS.value = '' // 清空固件信息
+    })
   }
 })
 
 onUnmounted(() => {
   // 清理监听器
-  if (window.electron && window.electron.removeMavlinkListener) {
-    window.electron.removeMavlinkListener()
+  if (window.electron) {
+    if (window.electron.removeMavlinkListener) {
+      window.electron.removeMavlinkListener()
+    }
+    if (window.electron.removeFirmwareListener) {
+      window.electron.removeFirmwareListener()
+    }
+    if (window.electron.removeSerialListeners) {
+      window.electron.removeSerialListeners()
+    }
   }
 })
 </script>
@@ -331,6 +422,68 @@ onUnmounted(() => {
         </div>
       </div>
 
+      <!-- 紧凑的连接状态显示 -->
+      <div class="compact-connection-status">
+        <div class="status-row">
+          <div class="status-info">
+            <!-- 连接状态图标 -->
+            <div class="connection-icon" :class="{ connected: isConnected }">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="3"/>
+                <path d="M12 1v6m0 6v6"/>
+                <path d="m5.6 5.6 4.2 4.2m4.4 4.4 4.2 4.2M1 12h6m6 0h6m-16.4.6 4.2-4.2m4.4-4.4 4.2-4.2"/>
+              </svg>
+            </div>
+            <span class="status-text" :class="{ connected: isConnected }">
+              {{ connectionStatus }}
+              <span v-if="firmwareOS" class="firmware-badge">{{ firmwareOS }}</span>
+            </span>
+          </div>
+          <button class="dropdown-toggle" @click="toggleConnectionDropdown" :class="{ active: showConnectionDropdown }">
+            <ion-icon :name="showConnectionDropdown ? 'chevron-up-outline' : 'chevron-down-outline'"></ion-icon>
+          </button>
+        </div>
+
+        <!-- 可展开的连接配置面板 -->
+        <div class="connection-dropdown" v-show="showConnectionDropdown">
+          <div class="dropdown-content">
+            <div class="control-group">
+              <label>串口设备</label>
+              <div class="port-select-group">
+                <select v-model="selectedPort" :disabled="isConnected" class="control-select">
+                  <option value="">选择串口</option>
+                  <option v-for="port in serialPorts" :key="port.path" :value="port.path">
+                    {{ port.path }} {{ port.manufacturer ? `(${port.manufacturer})` : '' }}
+                  </option>
+                </select>
+                <button @click="refreshSerialPorts" :disabled="isConnected" class="refresh-btn" title="刷新串口列表">
+                  <ion-icon name="refresh-outline"></ion-icon>
+                </button>
+              </div>
+            </div>
+
+            <div class="control-group">
+              <label>波特率</label>
+              <select v-model="selectedBaudRate" :disabled="isConnected" class="control-select">
+                <option v-for="rate in baudRateOptions" :key="rate" :value="rate">
+                  {{ rate }}
+                </option>
+              </select>
+            </div>
+
+            <button
+              @click="isConnected ? disconnectSerial() : connectSerial()"
+              :class="['connect-btn', isConnected ? 'connected' : '']"
+            >
+              <ion-icon :name="isConnected ? 'close-circle-outline' : 'play-circle-outline'"></ion-icon>
+              {{ isConnected ? '断开连接' : '连接' }}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="sidebar-divider"></div>
+
       <div class="menu-container">
         <div v-for="(item, index) in menuItems" :key="index" class="menu-group">
           <div class="menu-header" :class="{ active: item.isOpen }" @click="toggleMenu(index)">
@@ -346,7 +499,7 @@ onUnmounted(() => {
             ></ion-icon>
           </div>
           <div class="submenu" v-show="item.isOpen && item.children">
-            <span v-for="(child, cIndex) in item.children" :key="cIndex" class="submenu-item" @click="handleMenuItemClick(item.title, child)">
+            <span v-for="(child, cIndex) in item.children" :key="cIndex" class="submenu-item">
               {{ child }}
             </span>
           </div>
@@ -404,7 +557,18 @@ onUnmounted(() => {
         <span class="compass-heading-display">{{ Math.round(telemetry.heading) }}°</span>
       </div>
 
-      <div class="video-pip"><span>LIVE PAYLOAD FEED</span></div>
+      <!-- 视频窗口容器 -->
+      <div class="video-container">
+        <!-- 相机图标按钮 -->
+        <div class="camera-toggle" @click="toggleVideoFeed" :title="showVideoFeed ? '关闭视频' : '打开视频'">
+          <img src="/home/warnie/Documents/VSCODE/DronePilot/dronepilot/public/camera.svg" alt="Camera" class="camera-icon" />
+        </div>
+
+        <!-- 视频窗口（可折叠） -->
+        <div class="video-pip" v-show="showVideoFeed">
+          <span>LIVE PAYLOAD FEED</span>
+        </div>
+      </div>
 
       <!-- 右侧无人机状态面板 -->
       <!-- 切换按钮 - 独立于面板之外 -->
@@ -416,7 +580,7 @@ onUnmounted(() => {
         <div class="status-panel-content">
           <div class="panel-header">
             <ion-icon name="hardware-chip-outline"></ion-icon>
-            <span>无人机状态</span>
+            <span>数据看板</span>
           </div>
 
           <!-- 电池状态 -->
@@ -468,23 +632,23 @@ onUnmounted(() => {
           <div class="status-section">
             <div class="section-title">
               <ion-icon name="navigate-circle-outline"></ion-icon>
-              <span>��态与位置</span>
+              <span>IMU姿态</span>
             </div>
             <div class="status-grid">
               <div class="status-item">
-                <span class="label">俯仰角 (Pitch)</span>
+                <span class="label">Pitch</span>
                 <span class="value">{{ (telemetry.pitch * 180 / Math.PI).toFixed(1) }}°</span>
               </div>
               <div class="status-item">
-                <span class="label">横滚角 (Roll)</span>
+                <span class="label">Roll</span>
                 <span class="value">{{ (telemetry.roll * 180 / Math.PI).toFixed(1) }}°</span>
               </div>
               <div class="status-item">
-                <span class="label">偏航角 (Yaw)</span>
+                <span class="label">Yaw</span>
                 <span class="value">{{ (telemetry.yaw * 180 / Math.PI).toFixed(1) }}°</span>
               </div>
               <div class="status-item">
-                <span class="label">指南针航向</span>
+                <span class="label">Compass</span>
                 <span class="value">{{ Math.round(telemetry.heading) }}°</span>
               </div>
               <div class="status-item full-width">
@@ -496,11 +660,11 @@ onUnmounted(() => {
                 <span class="value">{{ telemetry.longitude.toFixed(7) }}</span>
               </div>
               <div class="status-item">
-                <span class="label">海拔高度</span>
+                <span class="label">Attitude</span>
                 <span class="value">{{ telemetry.altitude }}m</span>
               </div>
               <div class="status-item">
-                <span class="label">地速</span>
+                <span class="label">Speed</span>
                 <span class="value">{{ telemetry.speed }}m/s</span>
               </div>
             </div>
@@ -542,12 +706,18 @@ onUnmounted(() => {
 }
 
 .brand-area {
-  padding: 25px 20px;
+  padding: 20px 20px 12px 20px;
   display: flex;
   align-items: center;
   gap: 12px;
-  border-bottom: 1px solid #2d2d30;
-  margin-bottom: 20px;
+  border-bottom: none;
+  margin-bottom: 0;
+}
+
+.sidebar-divider {
+  height: 1px;
+  background: #2d2d30;
+  margin: 0 0 15px 0;
 }
 
 .brand-logo svg {
@@ -570,6 +740,283 @@ onUnmounted(() => {
   font-weight: 400;
   margin-top: 2px;
 }
+
+/* 紧凑的连接状态 */
+.compact-connection-status {
+  margin: 0 15px 10px 15px;
+  padding: 6px 10px 6px 12px;
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.15) 0%, rgba(37, 99, 235, 0.1) 100%);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: 6px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+  position: relative;
+  max-width: 200px;
+}
+
+.compact-connection-status::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 4px;
+  bottom: 4px;
+  width: 2px;
+  background: linear-gradient(180deg, var(--accent) 0%, rgba(59, 130, 246, 0.3) 100%);
+  border-radius: 2px 0 0 2px;
+}
+
+.status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.status-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.connection-icon {
+  width: 14px;
+  height: 14px;
+  color: #6b7280;
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.connection-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.connection-icon.connected {
+  color: #10b981;
+  filter: drop-shadow(0 0 4px rgba(16, 185, 129, 0.6));
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+@keyframes pulse-glow {
+  0%, 100% {
+    filter: drop-shadow(0 0 4px rgba(16, 185, 129, 0.6));
+  }
+  50% {
+    filter: drop-shadow(0 0 8px rgba(16, 185, 129, 0.8));
+  }
+}
+
+.status-text {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-weight: 500;
+  transition: color 0.3s ease;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.status-text.connected {
+  color: #10b981;
+}
+
+.firmware-badge {
+  display: inline-block;
+  padding: 3px 6px;
+  background: rgba(59, 130, 246, 0.2);
+  border: 1px solid rgba(92, 114, 150, 0.4);
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 650;
+  color: #ffffff;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+
+.dropdown-toggle {
+  width: 20px;
+  height: 20px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-muted);
+  border-radius: 3px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.dropdown-toggle:hover {
+  background: rgba(59, 130, 246, 0.2);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.dropdown-toggle.active {
+  background: rgba(59, 130, 246, 0.2);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.connection-dropdown {
+  margin-top: 8px;
+  animation: slideDown 0.2s ease-out;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.dropdown-content {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  background: rgba(0, 0, 0, 0.5);
+  border-radius: 6px;
+  border: 1px solid rgba(59, 130, 246, 0.2);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.control-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.control-group label {
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+}
+
+.port-select-group {
+  display: flex;
+  gap: 6px;
+}
+
+.control-select {
+  flex: 1;
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #fff;
+  padding: 6px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  outline: none;
+  transition: all 0.2s ease;
+}
+
+.control-select:hover:not(:disabled) {
+  border-color: rgba(59, 130, 246, 0.5);
+  background: rgba(59, 130, 246, 0.1);
+}
+
+.control-select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+}
+
+.control-select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.control-select option {
+  background: #1a1a1a;
+  color: #fff;
+  padding: 8px;
+}
+
+.refresh-btn {
+  width: 30px;
+  height: 30px;
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--accent);
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  font-size: 16px;
+}
+
+.refresh-btn:hover:not(:disabled) {
+  background: rgba(59, 130, 246, 0.2);
+  border-color: var(--accent);
+  transform: rotate(90deg);
+}
+
+.refresh-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.connect-btn {
+  width: 100%;
+  padding: 8px 12px;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: all 0.2s ease;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.connect-btn:hover {
+  background: #2563eb;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+}
+
+.connect-btn:active {
+  transform: translateY(0);
+}
+
+.connect-btn.connected {
+  background: #ef4444;
+}
+
+.connect-btn.connected:hover {
+  background: #dc2626;
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4);
+}
+
+.connect-btn ion-icon {
+  font-size: 16px;
+}
+
 
 .menu-container {
   flex: 1;
@@ -742,23 +1189,23 @@ onUnmounted(() => {
 /* 独立地图控制面板 */
 .map-control-panel {
   position: absolute;
-  left: 20px;
-  top: 20px;
-  background: rgba(15, 23, 42, 0.9);
+  left: 18px;
+  top: 15px;
+  background: rgba(29, 28, 53, 0.9);
   backdrop-filter: blur(10px);
-  padding: 12px 20px;
-  border-radius: 8px;
+  padding: 6px 14px;
+  border-radius: 10px;
   z-index: 1000;
   border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
   min-width: 180px;
 }
 
 .map-control-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 12px;
+  gap: 6px;
+  font-size: 11px;
   color: var(--accent);
   margin-bottom: 10px;
   font-weight: 600;
@@ -930,16 +1377,61 @@ onUnmounted(() => {
   text-shadow: 0 0 5px rgba(59, 130, 246, 0.7);
 }
 
-/* Video PiP */
-.video-pip {
+/* Video Container & Camera Toggle */
+.video-container {
   position: absolute;
   bottom: 20px;
   right: 20px;
+  z-index: 1000;
+}
+
+.camera-toggle {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 50px;
+  height: 50px;
+  background: rgba(15, 23, 42, 0.95);
+  backdrop-filter: blur(10px);
+  border: 2px solid rgba(59, 130, 246, 0.4);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+  z-index: 1001;
+}
+
+.camera-toggle:hover {
+  background: rgba(59, 130, 246, 0.3);
+  border-color: rgba(59, 130, 246, 0.8);
+  transform: scale(1.1);
+  box-shadow: 0 6px 20px rgba(59, 130, 246, 0.4);
+}
+
+.camera-icon {
+  width: 26px;
+  height: 26px;
+  filter: invert(1);
+  opacity: 0.9;
+  transition: opacity 0.3s ease;
+}
+
+.camera-toggle:hover .camera-icon {
+  opacity: 1;
+}
+
+/* Video PiP */
+.video-pip {
+  position: absolute;
+  bottom: 60px;
+  right: 0;
   width: 320px;
   height: 180px;
   background: #000;
   border: 1px solid #333;
-  z-index: 1000;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -947,6 +1439,18 @@ onUnmounted(() => {
   font-size: 14px;
   border-radius: 8px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+  animation: slideIn 0.3s ease-out;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* 右侧无人机状态面板 */

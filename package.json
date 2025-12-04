@@ -27,6 +27,7 @@
     "ionicons": "^8.0.13",
     "leaflet": "^1.9.4",
     "node-mavlink": "^2.3.0",
+    "serialport": "^13.0.0",
     "ws": "^8.18.3"
   },
   "devDependencies": {
