@@ -21,7 +21,7 @@
 
 ![地面站](https://youke1.picui.cn/s1/2025/12/04/6931898ca7ea7.png "DronePilot")
 
-## 🏗️ 技术架构
+## 🏗️ 技术架构 
 
 ### 核心框架
 
