@@ -422,22 +422,59 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- 紧凑的连接状态显示 -->
-      <div class="compact-connection-status">
-        <div class="status-row">
-          <div class="status-info">
-            <!-- 连接状态图标 -->
-            <div class="connection-icon" :class="{ connected: isConnected }">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <circle cx="12" cy="12" r="3"/>
-                <path d="M12 1v6m0 6v6"/>
-                <path d="m5.6 5.6 4.2 4.2m4.4 4.4 4.2 4.2M1 12h6m6 0h6m-16.4.6 4.2-4.2m4.4-4.4 4.2-4.2"/>
-              </svg>
+      <div class="menu-container">
+        <div v-for="(item, index) in menuItems" :key="index" class="menu-group">
+          <div class="menu-header" :class="{ active: item.isOpen }" @click="toggleMenu(index)">
+            <div class="header-content">
+              <ion-icon :name="item.icon" size="small"></ion-icon>
+              <span>{{ item.title }}</span>
             </div>
+            <ion-icon
+              v-if="item.children"
+              name="chevron-down-outline"
+              class="chev-icon"
+              :class="{ 'rotate-90': item.isOpen }"
+            ></ion-icon>
+          </div>
+          <div class="submenu" v-show="item.isOpen && item.children">
+            <span v-for="(child, cIndex) in item.children" :key="cIndex" class="submenu-item">
+              {{ child }}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <div class="status-card-container">
+        <div class="drone-status-card">
+          <div style="display: flex; justify-content: space-between; margin-bottom: 10px; font-weight: 600">
+            <span>Quadcopter</span><span style="color: #10b981">Ready to Fly</span>
+          </div>
+          <div style="display: flex; justify-content: space-between; color: var(--text-muted)">
+            <span>Battery</span> <span>{{ telemetry.battery.toFixed(0) }}%</span>
+          </div>
+          <div class="battery-bar">
+            <div class="battery-fill" :style="{ width: telemetry.battery + '%' }"></div>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <main class="map-view">
+      <!-- 串口连接面板 - 右上角 -->
+      <div class="serial-connection-panel">
+        <div class="connection-header">
+          <div class="connection-icon" :class="{ connected: isConnected }">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="3"/>
+              <path d="M12 1v6m0 6v6"/>
+              <path d="m5.6 5.6 4.2 4.2m4.4 4.4 4.2 4.2M1 12h6m6 0h6m-16.4.6 4.2-4.2m4.4-4.4 4.2-4.2"/>
+            </svg>
+          </div>
+          <div class="connection-info">
             <span class="status-text" :class="{ connected: isConnected }">
               {{ connectionStatus }}
-              <span v-if="firmwareOS" class="firmware-badge">{{ firmwareOS }}</span>
             </span>
+            <span v-if="firmwareOS" class="firmware-badge">{{ firmwareOS }}</span>
           </div>
           <button class="dropdown-toggle" @click="toggleConnectionDropdown" :class="{ active: showConnectionDropdown }">
             <ion-icon :name="showConnectionDropdown ? 'chevron-up-outline' : 'chevron-down-outline'"></ion-icon>
@@ -482,46 +519,6 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <div class="sidebar-divider"></div>
-
-      <div class="menu-container">
-        <div v-for="(item, index) in menuItems" :key="index" class="menu-group">
-          <div class="menu-header" :class="{ active: item.isOpen }" @click="toggleMenu(index)">
-            <div class="header-content">
-              <ion-icon :name="item.icon" size="small"></ion-icon>
-              <span>{{ item.title }}</span>
-            </div>
-            <ion-icon
-              v-if="item.children"
-              name="chevron-down-outline"
-              class="chev-icon"
-              :class="{ 'rotate-90': item.isOpen }"
-            ></ion-icon>
-          </div>
-          <div class="submenu" v-show="item.isOpen && item.children">
-            <span v-for="(child, cIndex) in item.children" :key="cIndex" class="submenu-item">
-              {{ child }}
-            </span>
-          </div>
-        </div>
-      </div>
-
-      <div class="status-card-container">
-        <div class="drone-status-card">
-          <div style="display: flex; justify-content: space-between; margin-bottom: 10px; font-weight: 600">
-            <span>Quadcopter</span><span style="color: #10b981">Ready to Fly</span>
-          </div>
-          <div style="display: flex; justify-content: space-between; color: var(--text-muted)">
-            <span>Battery</span> <span>{{ telemetry.battery.toFixed(0) }}%</span>
-          </div>
-          <div class="battery-bar">
-            <div class="battery-fill" :style="{ width: telemetry.battery + '%' }"></div>
-          </div>
-        </div>
-      </div>
-    </aside>
-
-    <main class="map-view">
       <div class="hud-top-bar">
         <div class="metric">
           <span class="label">H.S (m/s)</span><span class="value">{{ telemetry.speed }}</span>
@@ -687,7 +684,7 @@ onUnmounted(() => {
 
 #app {
   display: grid;
-  grid-template-columns: 280px 1fr;
+  grid-template-rows: auto 1fr;
   height: 100vh;
   width: 100vw;
   background: #000;
@@ -695,39 +692,36 @@ onUnmounted(() => {
   overflow: hidden;
 }
 
-/* --- SIDEBAR --- */
+/* --- TOP TOOLBAR --- */
 .sidebar {
   background: var(--sidebar-bg);
-  border-right: 1px solid #333;
+  border-bottom: 1px solid #333;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  align-items: center;
+  padding: 10px 20px;
+  gap: 30px;
   z-index: 1001;
   user-select: none;
+  height: auto;
 }
 
 .brand-area {
-  padding: 20px 20px 12px 20px;
   display: flex;
   align-items: center;
   gap: 12px;
-  border-bottom: none;
-  margin-bottom: 0;
-}
-
-.sidebar-divider {
-  height: 1px;
-  background: #2d2d30;
-  margin: 0 0 15px 0;
+  border-right: 1px solid #2d2d30;
+  padding-right: 30px;
 }
 
 .brand-logo svg {
-  width: 48px;
-  height: 48px;
+  width: 40px;
+  height: 40px;
   fill: var(--accent);
 }
 
 .brand-text {
-  font-size: 18px;
+  font-size: 14px;
   font-weight: 700;
   letter-spacing: 0.5px;
   line-height: 1.2;
@@ -735,22 +729,21 @@ onUnmounted(() => {
 
 .brand-text span {
   display: block;
-  font-size: 11px;
+  font-size: 10px;
   color: var(--text-muted);
   font-weight: 400;
   margin-top: 2px;
 }
 
-/* 紧凑的连接状态 */
+/* 紧凑的连接状态 - 暂时保留在工具栏，稍后会移到右上角 */
 .compact-connection-status {
-  margin: 0 15px 10px 15px;
-  padding: 6px 10px 6px 12px;
+  padding: 6px 12px;
   background: linear-gradient(135deg, rgba(59, 130, 246, 0.15) 0%, rgba(37, 99, 235, 0.1) 100%);
   border: 1px solid rgba(59, 130, 246, 0.3);
   border-radius: 6px;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
   position: relative;
-  max-width: 200px;
+  min-width: 200px;
 }
 
 .compact-connection-status::before {
@@ -1019,25 +1012,29 @@ onUnmounted(() => {
 
 
 .menu-container {
+  display: flex;
+  flex-direction: row;
+  gap: 10px;
+  align-items: center;
   flex: 1;
-  overflow-y: auto;
-  padding: 0 15px;
 }
 
 .menu-group {
-  margin-bottom: 5px;
+  position: relative;
 }
 
 .menu-header {
-  padding: 12px 15px;
+  padding: 8px 15px;
   cursor: pointer;
   border-radius: 6px;
   color: var(--text-muted);
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 8px;
   transition: 0.2s;
   font-weight: 500;
+  font-size: 13px;
+  white-space: nowrap;
 }
 
 .menu-header:hover {
@@ -1053,12 +1050,13 @@ onUnmounted(() => {
 .header-content {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
 }
 
 .chev-icon {
   transition: transform 0.3s ease;
-  font-size: 14px;
+  font-size: 12px;
+  margin-left: 4px;
 }
 
 .rotate-90 {
@@ -1066,25 +1064,36 @@ onUnmounted(() => {
 }
 
 .submenu {
-  padding-left: 40px;
-  overflow: hidden;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 8px;
+  background: rgba(24, 24, 27, 0.98);
+  border: 1px solid #333;
+  border-radius: 8px;
+  padding: 8px;
+  min-width: 180px;
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.4);
+  z-index: 1000;
 }
 
 .submenu-item {
-  padding: 10px 0;
+  padding: 10px 12px;
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: 12px;
   cursor: pointer;
   transition: 0.2s;
   display: block;
+  border-radius: 4px;
 }
 
 .submenu-item:hover {
+  background: var(--sidebar-hover);
   color: var(--accent);
 }
 
 .status-card-container {
-  padding: 20px;
+  display: none; /* 隐藏状态卡片，因为信息已在右侧面板显示 */
 }
 
 .drone-status-card {
@@ -1118,27 +1127,55 @@ onUnmounted(() => {
   background: #0f0f0f;
 }
 
+/* 串口连接面板 - 右上角 */
+.serial-connection-panel {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  background: rgba(15, 23, 42, 0.9);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: 8px;
+  padding: 12px;
+  z-index: 1000;
+  min-width: 250px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+}
+
+.connection-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.connection-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
 #map {
   width: 100%;
   height: 100%;
   z-index: 1;
 }
 
-/* HUD */
+/* HUD - 移到右下角，透明磨砂效果 */
 .hud-top-bar {
   position: absolute;
-  top: 20px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: rgba(15, 23, 42, 0.9);
-  backdrop-filter: blur(10px);
+  bottom: 20px;
+  right: 20px;
+  background: rgba(15, 23, 42, 0.6);
+  backdrop-filter: blur(15px);
+  -webkit-backdrop-filter: blur(15px);
   padding: 12px 40px;
-  border-radius: 8px;
+  border-radius: 10px;
   display: flex;
   gap: 50px;
   z-index: 1000;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
 }
 
 .metric {
@@ -1294,10 +1331,10 @@ onUnmounted(() => {
   filter: brightness(1.05) contrast(1.08) saturate(1.1);
 }
 
-/* Compass Widget */
+/* Compass Widget - 移到串口面板下方 */
 .compass-widget {
   position: absolute;
-  top: 20px;
+  top: 180px;
   right: 20px;
   width: 90px;
   height: 90px;
